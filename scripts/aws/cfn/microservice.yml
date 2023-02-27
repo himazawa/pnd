@@ -1,0 +1,687 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: 'Example microservice deploy'
+
+Parameters:
+  ProjectName:
+    Type: String
+    Description: 'Usually pn can be pnXYZ where XYZ are the feature number, useful to create
+      experimental environments without crash official development environment'
+
+  ApiDnsName:
+    Type: String
+    Description: 'The DNS name used for B2B rest API.'
+
+  WebApiDnsName:
+    Type: String
+    Description: 'The DNS name used for WEB rest API.'
+
+  IoApiDnsName:
+    Type: String
+    Description: 'The DNS name used for IO rest API.'
+
+  CorsAllowedDomains:
+    Type: String
+    Description: 'Comma separated list of domains allowed to make cross origin request'
+
+  ContainerImageUri:
+    Type: String
+    Description: 'Exact container image URI with full repository and image digest'
+
+  MicroserviceNumber:
+    Type: Number
+    Description: 'Disambiguation useful for load balancer rules'
+
+  TemplateBucketBaseUrl:
+    Type: String
+    Description: 'The S3 bucket from which to fetch the templates used by this stack.'
+
+  DeliveryPushInputsQueueName:
+    Type: String
+    Description: 'Queue to pull for inputs event'
+
+  SandboxSafeStorageBaseUrl:
+     Type: String
+     Description: 'Url to the SafeStorage microservice'
+
+  NotificationsDynamoTableName:
+    Type: String
+    Description: 'Notifications Dynamo table name'
+
+  NotificationsDynamoTableArn:
+    Type: String
+    Description: 'ARN of dynamodb table containing notifications'
+
+  NotificationsDynamoTableStreamArn:
+    Type: String
+    Description: 'ARN of dynamodb table containing notifications streams'
+
+  NotificationsCostDynamoTableName:
+    Type: String
+    Description: 'Notifications Cost Dynamo table name'
+
+  NotificationsCostDynamoTableArn:
+    Type: String
+    Description: 'ARN of dynamodb table containing notifications cost'
+
+  NotificationsQRDynamoTableName:
+    Type: String
+    Description: 'Notifications QR Dynamo table name'
+
+  NotificationsQRDynamoTableArn:
+    Type: String
+    Description: 'ARN of dynamodb table containing notifications QR'
+
+  NotificationsMetadataDynamoTableName:
+    Type: String
+    Description: 'NotificationsMetadata Dynamo table name'
+
+  NotificationsMetadataDynamoTableArn:
+    Type: String
+    Description: 'ARN of dynamodb table containing notifications metadata'
+
+  NotificationDelegationMetadataDynamoTableName:
+    Type: String
+    Description: Name of dynamodb table containing delegated notifications metadata
+
+  NotificationDelegationMetadataDynamoTableArn:
+    Type: String
+    Description: ARN of dynamodb table containing delegated notifications metadata
+
+  ECSClusterName:
+    Type: String
+    Description: 'The name of the ECS cluster where the microservice is going to be deployed'
+
+  SubnetsIds:
+    Type: String
+    Description: 'subnets ids comma separated list. Where to deploy the microservice'
+
+  VpcId:
+    Type: String
+    Description: 'VpcId where the microservice is going to be deployed'
+  
+  EcsDefaultSecurityGroup:
+    Type: String
+    Description: 'Default security group required by infrastructure'
+
+  ApplicationLoadBalancerListenerArn:
+    Type: String
+    Description: 'Load balancer listener where HTTP endpoints is going to be registered'
+
+  ApplicationLoadBalancerDomain:
+    Type: String
+    Description: 'Base URL of the load balancer where the service is going to be reachable'
+
+  NetworkLoadBalancerLink:
+    Type: String
+    Description: 'network load balancer link for API-GW'
+  
+  AlarmSNSTopicArn:
+    Type: String
+    Description: ARN of alarm topic
+
+  Version:
+    Type: String
+    Description: 'keep track of used projects commitIds'
+
+  IsMvpDefaultValue:
+    Type: String
+    Description: 'default value to return if paTaxId not present in parameter store'
+    AllowedValues: [true, false]
+
+  MaxDocumentsAvailableDays:
+    Type: String
+    Description: 'maximum number of days in which documents are available from refinement'
+  
+  LogsKinesisSourceStreamArn:
+    Type: String
+    Description: 'Kinesis stream that receive logs'
+
+  DeliveryPushInputsQueueARN:
+    Type: String
+    Description: 'Target queue ARN for insert trigger'
+
+  DeliveryPushInputsQueueURL:
+    Type: String
+    Description: 'Target queue URL for insert trigger'
+
+  PnDeliveryInsertTriggerDLQARN:
+    Type: String
+    Description: 'DLQ ARN for insert trigger'
+
+  PnDeliveryInsertTriggerDLQAlarmARN:
+    Type: String
+    Description: 'DLQ Alarm ARN for insert trigger'
+
+  PnDeliveryInsertTriggerLambdaEventSourceMappingBatchSize:
+    Type: String
+    Description: 'BatchSize stream mapping'
+
+  PnDeliveryInsertTriggerLambdaEventSourceMappingMaximumBatchingWindowInSeconds:
+    Type: String
+    Description: 'BatchWindow stream mapping'
+
+  PnDeliveryInsertTriggerLambdaEventSourceMappingMaximumRetryAttempts:
+    Type: String
+    Description: 'MaxRetry stream mapping'
+
+  LogsKinesisFilterPattern:
+    Type: String
+    Default: ""
+    Description: 'Log kinesis filter pattern'
+
+  AlbSecurityGroup:
+    Type: String
+    Description: 'Application load balancer security group'
+
+  # Heath Check parameters
+  HealthCheckInterval:
+    Description: Seconds between two health check
+    Type: Number
+    Default: 60
+
+  HealthCheckTimeout:
+    Description: health check timeout seconds
+    Type: Number
+    Default: 5
+
+  HealthyThresholdCount:
+    Description: |
+      The number of consecutive health checks successes required before considering 
+      an unhealthy target healthy.
+    Type: Number
+    Default: 5
+
+  UnhealthyThresholdCount:
+    Description: |
+      The number of consecutive health check failures required before considering a target unhealthy.
+    Type: Number
+    Default: 2
+
+  # Instance parameters
+  # 256 (.25 vCPU) - Available memory values: 0.5GB, 1GB, 2GB
+  # 512 (.5 vCPU) - Available memory values: 1GB, 2GB, 3GB, 4GB
+  # 1024 (1 vCPU) - Available memory values: 2GB, 3GB, 4GB, 5GB, 6GB, 7GB, 8GB
+  # 2048 (2 vCPU) - Available memory values: Between 4GB and 16GB in 1GB increments
+  # 4096 (4 vCPU) - Available memory values: Between 8GB and 30GB in 1GB increments
+  CpuValue:
+    Type: Number
+    Default: 1024
+    Description: Fargate virtual CPU quantity 1024 equals one vCPU
+
+  # 0.5GB, 1GB, 2GB - Available cpu values: 256 (.25 vCPU)
+  # 1GB, 2GB, 3GB, 4GB - Available cpu values: 512 (.5 vCPU)
+  # 2GB, 3GB, 4GB, 5GB, 6GB, 7GB, 8GB - Available cpu values: 1024 (1 vCPU)
+  # Between 4GB and 16GB in 1GB increments - Available cpu values: 2048 (2 vCPU)
+  # Between 8GB and 30GB in 1GB increments - Available cpu values: 4096 (4 vCPU)
+  MemoryAmount:
+    Type: String
+    Default: 2GB
+    Description: memory amount reserved to the task pod.
+    AllowedValues: [ 2GB, 4GB, 6GB, 8GB ]
+
+  # Autoscaling parameters
+  AutoscalingCheckPeriod:
+    Default: 60
+    Type: Number
+    Description: minimum autoscaling number of tasks\
+
+  AutoscalingDataPointN:
+    Default: 1
+    Type: Number
+    Description: activate when N datapoint on M
+
+  AutoscalingDataPointM:
+    Default: 1
+    Type: Number
+    Description: activate when N datapoint on M
+
+  AutoscalingThreshold:
+    Default: 70
+    Type: String
+
+  MinTasksNumber:
+    Default: 1
+    Type: Number
+    Description: minimum autoscaling number of tasks
+
+  MaxTasksNumber:
+    Default: 6
+    Type: Number
+    Description: maximum autoscaling number of tasks
+
+  Mandate2DeliveryQueueName:
+    Type: String
+    Description: 'The name of the SQS queue used to communicate with pn-mandate module.'
+
+  Mandate2DeliveryQueueARN:
+    Type: String
+    Description: 'Identify the resource that the policy applies to.'
+
+Conditions:
+    SendLogToKinesis: !Not [ !Equals [ !Ref LogsKinesisSourceStreamArn, '' ] ]
+
+Resources:
+
+  # PN-Delivery microservice
+  DeliveryMicroservice:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub "${TemplateBucketBaseUrl}/fragments/ecs-service.yaml"
+      Parameters:
+        MicroServiceUniqueName: !Sub '${ProjectName}-delivery'
+        CpuValue: !Ref CpuValue
+        MemoryAmount: !Ref MemoryAmount
+        HealthCheckPath: /actuator/health
+        HealthCheckTimeout: !Ref HealthCheckTimeout
+        HealthCheckInterval: !Ref HealthCheckInterval
+        HealthyThresholdCount: !Ref HealthyThresholdCount
+        UnhealthyThresholdCount: !Ref UnhealthyThresholdCount
+        AutoscalingStrategy: REST-API
+        AutoscalingThreshold: !Ref AutoscalingThreshold
+        AutoscalingCheckPeriod: !Ref AutoscalingCheckPeriod
+        MinTasksNumber: !Ref MinTasksNumber
+        MaxTasksNumber: !Ref MaxTasksNumber
+        AutoscalingDataPointN: !Ref AutoscalingDataPointN
+        AutoscalingDataPointM: !Ref AutoscalingDataPointM
+        AlarmSNSTopicArn: !Ref AlarmSNSTopicArn
+        ContainerImageURI: !Sub '${ContainerImageUri}'
+        ContainerEnvEntry1: !Sub 'AWS_REGIONCODE=${AWS::Region}'
+        ContainerEnvEntry2: !Sub 'PN_DELIVERY_TOPICS_NEWNOTIFICATIONS=${DeliveryPushInputsQueueName}'
+        #ContainerEnvEntry3: !Sub 'AWS_BUCKETNAME=${AttachmentsBucketName}'
+        ContainerEnvEntry4: 'PN_DELIVERY_IUNRETRY=3'
+        #ContainerEnvEntry5: !Sub 'SPRING_DATA_CASSANDRA_KEYSPACENAME=${KeyspaceName}'
+        #ContainerEnvEntry6: 'SPRING_DATA_CASSANDRA_SSL=true'
+        #ContainerEnvEntry7: !Sub 'SPRING_DATA_CASSANDRA_CONTACTPOINTS=cassandra.${AWS::Region}.${AWS::URLSuffix}:9142'
+        ContainerEnvEntry8: !Sub 'CORS_ALLOWED_DOMAINS=${CorsAllowedDomains}'
+        ContainerEnvEntry9: !Sub 'PN_DELIVERY_DELIVERYPUSHBASEURL=http://${ApplicationLoadBalancerDomain}:8080'
+        ContainerEnvEntry10: !Sub 'PN_DELIVERY_NOTIFICATIONDAO_TABLENAME=${NotificationsDynamoTableName}'
+        ContainerEnvEntry11: !Sub 'PN_DELIVERY_NOTIFICATIONMETADATADAO_TABLENAME=${NotificationsMetadataDynamoTableName}'
+        ContainerEnvEntry12: !Sub 'PN_DELIVERY_NOTIFICATIONCOSTDAO_TABLENAME=${NotificationsCostDynamoTableName}'
+        ContainerEnvEntry13: !Sub 'PN_DELIVERY_MANDATEBASEURL=http://${ApplicationLoadBalancerDomain}:8080'
+        ContainerEnvEntry14: !Sub 'PN_DELIVERY_SAFESTORAGEBASEURL=${SandboxSafeStorageBaseUrl}'
+        ContainerEnvEntry15: 'PN_DELIVERY_DATAVAULTBASEURL=http://alb.confidential.pn.internal:8080'
+        ContainerEnvEntry16: 'PN_DELIVERY_SAFESTORAGECXID=pn-delivery'
+        ContainerEnvEntry17: !Sub 'PN_DELIVERY_EXTERNALREGISTRIESBASEURL=http://${ApplicationLoadBalancerDomain}:8080'
+        ContainerEnvEntry18: !Sub 'PN_DELIVERY_NOTIFICATIONQRDAO_TABLENAME=${NotificationsQRDynamoTableName}'
+        ContainerEnvEntry19: !Sub 'PN_DELIVERY_MAXDOCUMENTSAVAILABLEDAYS=${MaxDocumentsAvailableDays}'
+        ContainerEnvEntry20: !Sub 'PN_COMMONS_FEATURES_ISMVPDEFAULTVALUE=${IsMvpDefaultValue}'
+        ContainerEnvEntry21: !Sub 'PN_DELIVERY_TOPICS_PAYMENTEVENTS=${DeliveryPushInputsQueueName}'
+        ContainerEnvEntry22: !Sub 'PN_DELIVERY_SQS_FROM_PN_MANDATE_NAME=${Mandate2DeliveryQueueName}'
+        ContainerEnvEntry23: !Sub 'PN_DELIVERY_NOTIFICATIONDELEGATIONMETADATADAO_TABLENAME=${NotificationDelegationMetadataDynamoTableName}'
+        JavaToolOptions: '-Dreactor.netty.ioWorkerCount=50 -XX:MaxMetaspaceSize=512M'
+        MappedPaths: '/delivery/*,/delivery-private/*'
+        ECSClusterName: !Ref ECSClusterName
+        Subnets: !Ref SubnetsIds
+        VpcId: !Ref VpcId
+        EcsDefaultSecurityGroup: !Ref EcsDefaultSecurityGroup
+        LoadBalancerListenerArn: !Ref ApplicationLoadBalancerListenerArn
+        LoadbalancerRulePriority: !Ref MicroserviceNumber
+        CloudwatchLogKinesisStreamArn: !Ref LogsKinesisSourceStreamArn
+        TaskRoleManagedPolicyArn: !Ref DeliveryMicroserviceTaskManagedPolicy
+        AlbSecurityGroup: !Ref AlbSecurityGroup
+
+  # Grant operational rights to PN-Delivery microservice
+  DeliveryMicroserviceTaskManagedPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - sqs:ChangeMessageVisibility
+              - sqs:DeleteMessage
+              - sqs:GetQueueAttributes
+              - sqs:GetQueueUrl
+              - sqs:ReceiveMessage
+              - sqs:SendMessage
+            Resource:
+              - !Ref DeliveryPushInputsQueueARN
+              - !Ref Mandate2DeliveryQueueARN
+          - Effect: Allow
+            Action:
+              - 'dynamodb:GetItem'
+              - 'dynamodb:Query'
+              - 'dynamodb:PutItem'
+            Resource:
+              - !Sub "${NotificationsDynamoTableArn}"
+              - !Sub "${NotificationsMetadataDynamoTableArn}"
+              - !Sub "${NotificationsMetadataDynamoTableArn}/*"
+              - !Sub "${NotificationDelegationMetadataDynamoTableArn}"
+              - !Sub "${NotificationDelegationMetadataDynamoTableArn}/*"
+              - !Sub "${NotificationsCostDynamoTableArn}"
+              - !Sub "${NotificationsCostDynamoTableArn}/*"
+              - !Sub "${NotificationsQRDynamoTableArn}"
+              - !Sub "${NotificationsQRDynamoTableArn}/*"
+          - Effect: Allow
+            Action:
+              - ssm:GetParameter
+              - ssm:GetParameters
+            Resource:
+              - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/MapPaMVP'
+              - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/MapTaxIdWhiteList'
+
+  # Expose PN-Delivery microservice public API with API-GW for B2B usage
+  DeliveryMicroservicePublicAPI:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub "${TemplateBucketBaseUrl}/fragments/api-gw-expose-service.yaml"
+      Parameters:
+        MicroServiceUniqueName: !Sub '${ProjectName}-delivery'
+        IntendedUsage: B2B
+        DnsName: !Ref ApiDnsName
+        ProjectName: !Ref ProjectName
+        ServiceApiPath: 'delivery'
+        NetworkLoadBalancerLink: !Ref NetworkLoadBalancerLink
+        ApplicationLoadBalancerDomain: !Ref ApplicationLoadBalancerDomain
+        AlarmSNSTopicArn: !Ref AlarmSNSTopicArn
+        CloudwatchLogKinesisStreamArn: !Ref LogsKinesisSourceStreamArn
+  DeliveryMicroservicePublicApiWaf:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub "${TemplateBucketBaseUrl}/fragments/api-gw-waf-acl.yaml"
+      Parameters:
+        WAFName: !Sub '${ProjectName}-delivery-b2b'
+        IntendedUsage: B2B
+        APIGatewayARNs: !GetAtt DeliveryMicroservicePublicAPI.Outputs.APIGatewayARN
+        ExcludedRule0: CrossSiteScripting_BODY
+
+  # Expose PN-Delivery microservice public API with API-GW for WEB usage
+  DeliveryMicroservicePublicWebAPI:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub "${TemplateBucketBaseUrl}/fragments/api-gw-expose-service.yaml"
+      Parameters:
+        MicroServiceUniqueName: !Sub '${ProjectName}-delivery'
+        IntendedUsage: WEB
+        DnsName: !Ref WebApiDnsName
+        ProjectName: !Ref ProjectName
+        ServiceApiPath: 'delivery'
+        NetworkLoadBalancerLink: !Ref NetworkLoadBalancerLink
+        ApplicationLoadBalancerDomain: !Ref ApplicationLoadBalancerDomain
+        AlarmSNSTopicArn: !Ref AlarmSNSTopicArn
+        CloudwatchLogKinesisStreamArn: !Ref LogsKinesisSourceStreamArn        
+  DeliveryMicroservicePublicWebApiWaf:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub "${TemplateBucketBaseUrl}/fragments/api-gw-waf-acl.yaml"
+      Parameters:
+        WAFName: !Sub '${ProjectName}-delivery-web'
+        IntendedUsage: WEB
+        APIGatewayARNs: !GetAtt DeliveryMicroservicePublicWebAPI.Outputs.APIGatewayARN
+        Limit: 6000
+
+  # Expose PN-Delivery microservice public API with API-GW for IO Backend usage
+  DeliveryMicroservicePublicIoAPI:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub "${TemplateBucketBaseUrl}/fragments/api-gw-expose-service.yaml"
+      Parameters:
+        MicroServiceUniqueName: !Sub '${ProjectName}-delivery'
+        IntendedUsage: IO
+        DnsName: !Ref IoApiDnsName
+        ProjectName: !Ref ProjectName
+        ServiceApiPath: 'delivery'
+        NetworkLoadBalancerLink: !Ref NetworkLoadBalancerLink
+        ApplicationLoadBalancerDomain: !Ref ApplicationLoadBalancerDomain
+        AlarmSNSTopicArn: !Ref AlarmSNSTopicArn
+        CloudwatchLogKinesisStreamArn: !Ref LogsKinesisSourceStreamArn        
+  DeliveryMicroservicePublicIoApiWaf:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub "${TemplateBucketBaseUrl}/fragments/api-gw-waf-acl.yaml"
+      Parameters:
+        WAFName: !Sub '${ProjectName}-delivery-io'
+        IntendedUsage: IO
+        APIGatewayARNs: !GetAtt DeliveryMicroservicePublicIoAPI.Outputs.APIGatewayARN
+
+  # Dashboard
+  DeliveryMicroserviceCloudWatchDashboard:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub "${TemplateBucketBaseUrl}/fragments/microservice-cloudwatch-dashboard.yaml"
+      Parameters:
+        DashboardName: !Sub "${ProjectName}-delivery"
+        DynamoDBTableNames: !Join
+          - ','
+          - - !Ref NotificationsDynamoTableName
+            - !Ref NotificationsCostDynamoTableName
+            - !Ref NotificationsMetadataDynamoTableName
+            - !Ref NotificationDelegationMetadataDynamoTableName
+            - !Ref NotificationsQRDynamoTableName
+        LambdaArns: !Join 
+          - ','
+          - - !GetAtt PnDeliveryInsertTriggerLambda.Arn
+        RestApiStageArns: !Join
+          - ','
+          - - !GetAtt DeliveryMicroservicePublicAPI.Outputs.RestApiStageArn
+            - !GetAtt DeliveryMicroservicePublicWebAPI.Outputs.RestApiStageArn
+            - !GetAtt DeliveryMicroservicePublicIoAPI.Outputs.RestApiStageArn
+        RestApiNames: !Join
+          - ','
+          - - !GetAtt DeliveryMicroservicePublicAPI.Outputs.RestApiName
+            - !GetAtt DeliveryMicroservicePublicWebAPI.Outputs.RestApiName
+            - !GetAtt DeliveryMicroservicePublicIoAPI.Outputs.RestApiName
+        AlarmArns: !Join
+          - ','
+          - - !GetAtt DeliveryMicroservice.Outputs.FatalLogsMetricAlarmArn
+            - !GetAtt DeliveryMicroservicePublicAPI.Outputs.RestApiErrorAlarmArn
+            - !GetAtt DeliveryMicroservicePublicWebAPI.Outputs.RestApiErrorAlarmArn
+            - !GetAtt DeliveryMicroservicePublicIoAPI.Outputs.RestApiErrorAlarmArn
+            - !GetAtt DeliveryMicroservicePublicAPI.Outputs.RestApiLatencyAlarmArn
+            - !GetAtt DeliveryMicroservicePublicWebAPI.Outputs.RestApiLatencyAlarmArn
+            - !GetAtt DeliveryMicroservicePublicIoAPI.Outputs.RestApiLatencyAlarmArn
+            - !Ref PnDeliveryInsertTriggerDLQAlarmARN
+        QueueArns: !Join
+          - ','
+          - - !Ref Mandate2DeliveryQueueARN
+
+  # Lambda function role
+  PnDeliveryInsertTriggerLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${ProjectName}-PnDeliveryInsertTriggerLambdaRole
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: /
+      Policies:
+        - PolicyName: !Sub ${ProjectName}-PnDeliveryInsertTriggerLambdaRolePolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Sid: WriteOnQueue
+                Effect: Allow
+                Action:
+                  - sqs:ChangeMessageVisibility
+                  - sqs:GetQueueAttributes
+                  - sqs:GetQueueUrl
+                  - sqs:SendMessage
+                Resource:
+                  - !Ref DeliveryPushInputsQueueARN
+                  - !Ref PnDeliveryInsertTriggerDLQARN
+              - Sid: ReceiveDynamoStream
+                Effect: Allow
+                Action:
+                  - "dynamodb:DescribeStream"
+                  - "dynamodb:GetRecords"
+                  - "dynamodb:GetShardIterator"
+                  - "dynamodb:ListStreams"
+                Resource:
+                  - !Ref NotificationsDynamoTableStreamArn
+              - Sid: CanWriteLogs
+                Effect: "Allow"
+                Action:
+                  - "logs:CreateLogGroup"
+                  - "logs:CreateLogStream"
+                  - "logs:PutLogEvents"
+                Resource: "*"
+
+  PnDeliveryInsertTriggerLambdaEventSourceMapping:
+    Type: AWS::Lambda::EventSourceMapping
+    Properties:
+      EventSourceArn: !Ref NotificationsDynamoTableStreamArn
+      StartingPosition: LATEST
+      BatchSize: !Sub ${PnDeliveryInsertTriggerLambdaEventSourceMappingBatchSize}
+      MaximumBatchingWindowInSeconds: !Sub ${PnDeliveryInsertTriggerLambdaEventSourceMappingMaximumBatchingWindowInSeconds}
+      MaximumRetryAttempts: !Sub ${PnDeliveryInsertTriggerLambdaEventSourceMappingMaximumRetryAttempts}
+      FunctionName: !GetAtt PnDeliveryInsertTriggerLambda.Arn
+       # Add an OnFailure destination on the event source mapping
+      DestinationConfig:
+        OnFailure:
+          Destination: !Ref PnDeliveryInsertTriggerDLQARN
+
+  ### Subscription filters with Kinesis  https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/SubscriptionFilters.html#DestinationKinesisExample
+  SubscriptionFilter:
+    Type: AWS::Logs::SubscriptionFilter
+    DependsOn:
+      - PnDeliveryInsertTriggerLambdaLogGroup
+    Condition: SendLogToKinesis
+    Properties:
+      RoleArn:
+        Fn::GetAtt:
+          - "SubscriptionFilterServiceRole"
+          - "Arn"
+      LogGroupName: !Sub "/aws/lambda/${PnDeliveryInsertTriggerLambda}"
+      FilterPattern: !Ref LogsKinesisFilterPattern
+      DestinationArn: !Ref LogsKinesisSourceStreamArn
+  
+  PnDeliveryInsertTriggerLambdaLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${PnDeliveryInsertTriggerLambda}"
+      RetentionInDays: 14
+
+  ### IAM Role used by Subscription filters to allow read logs from Cloudwatch and send logs to Kinesis Firehose
+  SubscriptionFilterServiceRole:
+    Type: AWS::IAM::Role
+    Condition: SendLogToKinesis
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action: sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service: logs.amazonaws.com
+        Version: "2012-10-17"
+      Path: /
+      Policies:
+        -
+          PolicyName: !Sub '${ProjectName}-delivery-lambda-logs-subscription-role'
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Action:
+                  - kinesis:PutRecord
+                Effect: Allow
+                Resource: "*"
+              - Action:
+                - "kms:Encrypt"
+                - "kms:GenerateDataKey"
+                - "kms:Decrypt"
+                Effect: Allow
+                Resource: "*"
+
+  PnDeliveryInsertTriggerLambdaAlarms:
+    Type: AWS::CloudFormation::Stack
+    DependsOn:
+      - PnDeliveryInsertTriggerLambdaLogGroup
+    Properties:
+      TemplateURL: !Sub "${TemplateBucketBaseUrl}/fragments/lambda-alarms.yaml"
+      Parameters:
+        FunctionName: !Ref PnDeliveryInsertTriggerLambda
+        AlarmSNSTopicArn: !Ref AlarmSNSTopicArn
+
+  PnDeliveryInsertTriggerLambda:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Handler: index.handler
+      Runtime: nodejs16.x
+      Description: 'It triggers notification workflow at notification insertion'
+      MemorySize: 128
+      Timeout: 10
+      Role: !GetAtt PnDeliveryInsertTriggerLambdaRole.Arn
+      Layers:
+        - !Sub "arn:aws:lambda:${AWS::Region}:339249233099:layer:LambdaInsightsExtension:13"          
+      Environment:
+        Variables:
+          QUEUE_URL: !Ref DeliveryPushInputsQueueURL
+      Code:
+        ZipFile: |
+              const AWS = require('aws-sdk')
+              const sqs = new AWS.SQS();
+
+              const QUEUE_URL = process.env.QUEUE_URL
+
+              exports.handler = async (event) => {
+                  console.log(JSON.stringify(event, null, 2));
+                  console.log(QUEUE_URL);
+
+                  for(var i = 0;i<event.Records.length;i++)
+                  {
+                      let record = event.Records[i];
+                      if (record.eventName != 'INSERT')
+                        continue;
+
+                      console.log('Processing dynamoDB Record: %j', record.dynamodb);
+                      const iun = record.dynamodb.Keys.iun.S;
+
+                      if (iun.match(/^\S\S\S\S-\S\S\S\S-\S\S\S\S-\d\d\d\d\d\d-\S-\d$/)==null)
+                        continue;
+
+                      const senderPaId = record.dynamodb.NewImage.senderPaId.S;
+
+                      var message = {
+                        DelaySeconds: 0,
+                        MessageGroupId: 'DELIVERY',
+                        MessageDeduplicationId: iun + "_start",
+                        MessageAttributes: {
+                          "createdAt": {
+                            DataType: "String",
+                            StringValue: new Date().toISOString()
+                          },
+                          "eventId": {
+                            DataType: "String",
+                            StringValue: iun + "_start"
+                          },
+                          "eventType": {
+                            DataType: "String",
+                            StringValue: "NEW_NOTIFICATION"
+                          },
+                          "iun": {
+                            DataType: "String",
+                            StringValue: iun
+                          },
+                          "publisher": {
+                            DataType: "String",
+                            StringValue: "DELIVERY"
+                          }
+                        },
+                        MessageBody: JSON.stringify({paId: senderPaId}),
+                        QueueUrl: QUEUE_URL
+                      };
+
+                      console.log('Sending message: %j', message);
+                      try{
+                          let queueRes = await sqs.sendMessage(message).promise();
+                          console.log("Sent message", queueRes.MessageId);
+                      }catch(exc){
+                          console.log("error sending message", exc)
+                          throw exc;
+                      }
+                  }
+
+                  const response = {
+                      StatusCode: 200
+                  };
+                  return response;
+
+              };
+      #ENDpndeliveryinserttrigger
+      #Non rimuovere o modificare il commento sopra, è usato come placeholder negli script
